@@ -1,245 +1,212 @@
-let lightMode = true;
-let recorder = null;
-let recording = false;
-let voiceOption = "default";
-const responses = [];
-const botRepeatButtonIDToIndexMap = {};
-const userRepeatButtonIDToRecordingMap = {};
-const baseUrl = window.location.origin;
+// ─── State ───────────────────────────────────────────────────────────────────
+const state = {
+  darkMode: false,
+  recording: false,
+  speaking: false,
+  voices: [],
+  selectedVoice: null,
+  recognition: null,
+  messageHistory: [],   // {role, text, audio?}
+};
 
-async function showBotLoadingAnimation() {
-  await sleep(500);
-  $(".loading-animation")[1].style.display = "inline-block";
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+const chatWindow   = document.getElementById('chat-window');
+const messageList  = document.getElementById('message-list');
+const msgInput     = document.getElementById('message-input');
+const sendBtn      = document.getElementById('send-btn');
+const micBtn       = document.getElementById('mic-btn');
+const botTyping    = document.getElementById('bot-typing');
+const darkToggle   = document.getElementById('dark-toggle');
+const voiceSelect  = document.getElementById('voice-select');
+const resetBtn     = document.getElementById('reset-btn');
+const sttStatus    = document.getElementById('stt-status');
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function scrollBottom() {
+  chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' });
 }
 
-function hideBotLoadingAnimation() {
-  $(".loading-animation")[1].style.display = "none";
+function removeWelcome() {
+  const w = messageList.querySelector('.welcome-msg');
+  if (w) w.remove();
 }
 
-async function showUserLoadingAnimation() {
-  await sleep(100);
-  $(".loading-animation")[0].style.display = "flex";
-}
-
-function hideUserLoadingAnimation() {
-  $(".loading-animation")[0].style.display = "none";
-}
-
-const getSpeechToText = async (userRecording) => {
-  let response = await fetch(baseUrl + "/speech-to-text", {
-    method: "POST",
-    body: userRecording.audioBlob,
+// ─── Voices (Web Speech Synthesis) ───────────────────────────────────────────
+function loadVoices() {
+  state.voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
+  voiceSelect.innerHTML = '<option value="">Auto Voice</option>';
+  state.voices.forEach((v, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `${v.name} (${v.lang})`;
+    voiceSelect.appendChild(opt);
   });
-  console.log(response);
-  response = await response.json();
-  console.log(response);
-  return response.text;
-};
+}
+speechSynthesis.onvoiceschanged = loadVoices;
+loadVoices();
 
-const processUserMessage = async (userMessage) => {
-  let response = await fetch(baseUrl + "/process-message", {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ userMessage: userMessage, voice: voiceOption }),
-  });
-  response = await response.json();
-  console.log(response);
-  return response;
-};
+voiceSelect.addEventListener('change', () => {
+  const idx = voiceSelect.value;
+  state.selectedVoice = idx !== '' ? state.voices[parseInt(idx)] : null;
+});
 
-const cleanTextInput = (value) => {
-  return value
-    .trim() // remove starting and ending spaces
-    .replace(/[\n\t]/g, "") // remove newlines and tabs
-    .replace(/<[^>]*>/g, "") // remove HTML tags
-    .replace(/[<>&;]/g, ""); // sanitize inputs
-};
+// ─── Text-to-Speech ───────────────────────────────────────────────────────────
+function speak(text) {
+  if (!text) return;
+  speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.voice = state.selectedVoice || state.voices[0] || null;
+  utt.rate = 1.0;
+  utt.pitch = 1.0;
+  speechSynthesis.speak(utt);
+}
 
-const recordAudio = () => {
-  return new Promise(async (resolve) => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mediaRecorder = new MediaRecorder(stream);
-    const audioChunks = [];
+// ─── Speech-to-Text ───────────────────────────────────────────────────────────
+function initRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return null;
+  const r = new SpeechRecognition();
+  r.lang = 'en-US';
+  r.continuous = false;
+  r.interimResults = true;
 
-    mediaRecorder.addEventListener("dataavailable", (event) => {
-      audioChunks.push(event.data);
-    });
-
-    const start = () => mediaRecorder.start();
-
-    const stop = () =>
-      new Promise((resolve) => {
-        mediaRecorder.addEventListener("stop", () => {
-          const audioBlob = new Blob(audioChunks, { type: "audio/mpeg" });
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-          const play = () => audio.play();
-          resolve({ audioBlob, audioUrl, play });
-        });
-
-        mediaRecorder.stop();
-      });
-
-    resolve({ start, stop });
-  });
-};
-
-const sleep = (time) => new Promise((resolve) => setTimeout(resolve, time));
-
-const toggleRecording = async () => {
-  if (!recording) {
-    recorder = await recordAudio();
-    recording = true;
-    recorder.start();
-  } else {
-    const audio = await recorder.stop();
-    sleep(1000);
-    return audio;
-  }
-};
-
-const playResponseAudio = (function () {
-  const df = document.createDocumentFragment();
-  return function Sound(src) {
-    const snd = new Audio(src);
-    df.appendChild(snd); // keep in fragment until finished playing
-    snd.addEventListener("ended", function () {
-      df.removeChild(snd);
-    });
-    snd.play();
-    return snd;
+  r.onstart = () => {
+    sttStatus.textContent = '● Listening…';
+    micBtn.classList.add('recording');
+    state.recording = true;
   };
-})();
 
-const getRandomID = () => {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
-};
+  r.onresult = (e) => {
+    const transcript = Array.from(e.results)
+      .map(r => r[0].transcript).join('');
+    msgInput.value = transcript;
+    if (e.results[e.results.length - 1].isFinal) {
+      sttStatus.textContent = '✓ Got it!';
+      setTimeout(() => { sttStatus.textContent = ''; }, 800);
+    }
+  };
 
-const scrollToBottom = () => {
-  // Scroll the chat window to the bottom
-  $("#chat-window").animate({
-    scrollTop: $("#chat-window")[0].scrollHeight,
-  });
-};
-const populateUserMessage = (userMessage, userRecording) => {
-  // Clear the input field
-  $("#message-input").val("");
+  r.onerror = (e) => {
+    console.error('STT error:', e.error);
+    sttStatus.textContent = e.error === 'not-allowed'
+      ? '⚠ Mic access denied' : '⚠ Try again';
+    setTimeout(() => { sttStatus.textContent = ''; }, 2000);
+  };
 
-  // Append the user's message to the message list
+  r.onend = () => {
+    micBtn.classList.remove('recording');
+    state.recording = false;
+    const val = msgInput.value.trim();
+    if (val) sendMessage(val);
+  };
 
-  if (userRecording) {
-    const userRepeatButtonID = getRandomID();
-    userRepeatButtonIDToRecordingMap[userRepeatButtonID] = userRecording;
-    hideUserLoadingAnimation();
-    $("#message-list").append(
-      `<div class='message-line my-text'><div class='message-box my-text${
-        !lightMode ? " dark" : ""
-      }'><div class='me'>${userMessage}</div></div>
-            <button id='${userRepeatButtonID}' class='btn volume repeat-button' onclick='userRepeatButtonIDToRecordingMap[this.id].play()'><i class='fa fa-volume-up'></i></button>
-            </div>`
-    );
+  return r;
+}
+
+micBtn.addEventListener('click', () => {
+  if (!state.recognition) state.recognition = initRecognition();
+  if (!state.recognition) {
+    sttStatus.textContent = '⚠ Not supported in this browser';
+    return;
+  }
+  if (state.recording) {
+    state.recognition.stop();
   } else {
-    $("#message-list").append(
-      `<div class='message-line my-text'><div class='message-box my-text${
-        !lightMode ? " dark" : ""
-      }'><div class='me'>${userMessage}</div></div></div>`
-    );
+    msgInput.value = '';
+    state.recognition.start();
+  }
+});
+
+// ─── Message rendering ───────────────────────────────────────────────────────
+function addMessage(role, text) {
+  removeWelcome();
+  const row = document.createElement('div');
+  row.className = `msg-row ${role}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'msg-avatar';
+  avatar.textContent = role === 'bot' ? '⬡' : 'You';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.textContent = text;
+
+  if (role === 'bot') {
+    const replayBtn = document.createElement('button');
+    replayBtn.className = 'replay-btn';
+    replayBtn.title = 'Replay audio';
+    replayBtn.textContent = '🔊';
+    replayBtn.addEventListener('click', () => speak(text));
+    row.append(avatar, bubble, replayBtn);
+  } else {
+    row.append(bubble, avatar);
   }
 
-  scrollToBottom();
-};
+  messageList.appendChild(row);
+  scrollBottom();
+  return row;
+}
 
-const populateBotResponse = async (userMessage) => {
-  await showBotLoadingAnimation();
-  const response = await processUserMessage(userMessage);
-  responses.push(response);
-
-  const repeatButtonID = getRandomID();
-  botRepeatButtonIDToIndexMap[repeatButtonID] = responses.length - 1;
-  hideBotLoadingAnimation();
-  // Append the random message to the message list
-  $("#message-list").append(
-    `<div class='message-line'><div class='message-box${
-      !lightMode ? " dark" : ""
-    }'>${
-      response.openaiResponseText
-    }</div><button id='${repeatButtonID}' class='btn volume repeat-button' onclick='playResponseAudio("data:audio/wav;base64," + responses[botRepeatButtonIDToIndexMap[this.id]].openaiResponseSpeech);console.log(this.id)'><i class='fa fa-volume-up'></i></button></div>`
-  );
-
-  playResponseAudio("data:audio/wav;base64," + response.openaiResponseSpeech);
-
-  scrollToBottom();
-};
-
-$(document).ready(function () {
-  // Listen for the "Enter" key being pressed in the input field
-  $("#message-input").keyup(function (event) {
-    let inputVal = cleanTextInput($("#message-input").val());
-
-    if (event.keyCode === 13 && inputVal != "") {
-      const message = inputVal;
-
-      populateUserMessage(message, null);
-      populateBotResponse(message);
-    }
-
-    inputVal = $("#message-input").val();
-
-    if (inputVal == "" || inputVal == null) {
-      $("#send-button")
-        .removeClass("send")
-        .addClass("microphone")
-        .html("<i class='fa fa-microphone'></i>");
-    } else {
-      $("#send-button")
-        .removeClass("microphone")
-        .addClass("send")
-        .html("<i class='fa fa-paper-plane'></i>");
-    }
+// ─── API call ─────────────────────────────────────────────────────────────────
+async function processMessage(userMessage) {
+  const res = await fetch('/process-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userMessage }),
   });
+  const data = await res.json();
+  return data.responseText;
+}
 
-  // When the user clicks the "Send" button
-  $("#send-button").click(async function () {
-    if ($("#send-button").hasClass("microphone") && !recording) {
-      toggleRecording();
-      $(".fa-microphone").css("color", "#f44336");
-      console.log("start recording");
-      recording = true;
-    } else if (recording) {
-      toggleRecording().then(async (userRecording) => {
-        console.log("stop recording");
-        await showUserLoadingAnimation();
-        const userMessage = await getSpeechToText(userRecording);
-        populateUserMessage(userMessage, userRecording);
-        populateBotResponse(userMessage);
-      });
-      $(".fa-microphone").css("color", "#125ee5");
-      recording = false;
-    } else {
-      // Get the message the user typed in
-      const message = cleanTextInput($("#message-input").val());
+// ─── Send flow ────────────────────────────────────────────────────────────────
+async function sendMessage(text) {
+  text = text.trim();
+  if (!text) return;
 
-      populateUserMessage(message, null);
-      populateBotResponse(message);
+  msgInput.value = '';
+  addMessage('user', text);
 
-      $("#send-button")
-        .removeClass("send")
-        .addClass("microphone")
-        .html("<i class='fa fa-microphone'></i>");
-    }
-  });
+  // show typing
+  botTyping.style.display = 'flex';
+  scrollBottom();
 
-  // handle the event of switching light-dark mode
-  $("#light-dark-mode-switch").change(function () {
-    $("body").toggleClass("dark-mode");
-    $(".message-box").toggleClass("dark");
-    $(".loading-dots").toggleClass("dark");
-    $(".dot").toggleClass("dark-dot");
-    lightMode = !lightMode;
-  });
+  try {
+    const response = await processMessage(text);
+    botTyping.style.display = 'none';
+    addMessage('bot', response);
+    speak(response);
+  } catch (err) {
+    botTyping.style.display = 'none';
+    addMessage('bot', 'Sorry, something went wrong. Please try again.');
+    console.error(err);
+  }
+}
 
-  $("#voice-options").change(function () {
-    voiceOption = $(this).val();
-    console.log(voiceOption);
-  });
+// ─── Input events ─────────────────────────────────────────────────────────────
+sendBtn.addEventListener('click', () => sendMessage(msgInput.value));
+
+msgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage(msgInput.value);
+  }
+});
+
+// ─── Dark mode ────────────────────────────────────────────────────────────────
+darkToggle.addEventListener('change', () => {
+  state.darkMode = darkToggle.checked;
+  document.body.classList.toggle('dark', state.darkMode);
+});
+
+// ─── Reset ────────────────────────────────────────────────────────────────────
+resetBtn.addEventListener('click', async () => {
+  messageList.innerHTML = `
+    <div class="welcome-msg">
+      <span class="wm-icon">⬡</span>
+      <p>Conversation reset.<br/>Start a new chat below.</p>
+    </div>`;
+  speechSynthesis.cancel();
+  await fetch('/reset', { method: 'POST' }).catch(() => {});
 });

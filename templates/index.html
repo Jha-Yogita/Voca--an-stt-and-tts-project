@@ -1,109 +1,78 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <link
-      rel="stylesheet"
-      href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
-      integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z"
-      crossorigin="anonymous"
-    />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"
-    />
-    <link rel="stylesheet" href="../static/style.css" />
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Voice Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="bg-orbs">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+  </div>
 
-    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
-    <script src="../static/script.js"></script>
-  </head>
-  <body>
-    <div class="container h-700">
-      <div class="row">
-        <div class="col-12" style="margin-top: 2rem">
-          <h1 class="text-center">Voice Assistant</h1>
-          <p class="text-center" style="font-size: 20px">
-            Your personal assistant powered by OpenAI's GPT model and Watson's
-            Text-to-Speech & Speech-to-Text
-          </p>
-        </div>
-        <div class="col-12" style="font-size: 16px">
-          <p class="text-center mb-4">
-            Try asking: What can you specifically do? Type in your question or
-            record it by clicking the microphone!
-          </p>
-        </div>
-        <div class="col-12 text-center d-flex justify-content-around">
-          <div class="custom-control custom-switch mb-3 d-inline-block">
-            <input
-              type="checkbox"
-              class="custom-control-input"
-              id="light-dark-mode-switch"
-            />
-            <label class="custom-control-label" for="light-dark-mode-switch"
-              >Toggle light/dark mode</label
-            >
-          </div>
-          <div class="d-inline-block">
-            <label class="voice-options-label" for="voice-options"
-              >Choose a Voice</label
-            >
-            <select id="voice-options">
-              <option value="">default</option>
-              <option value="en-US_MichaelV3Voice">Michael (English)</option>
-              <option value="en-US_HenryV3Voice">Henry (English)</option>
-              <option value="en-GB_KateV3Voice">Kate (English)</option>
-              <option value="en-GB_JamesV3Voice">James (English)</option>
-              <option value="en-GB_CharlotteV3Voice">
-                Charlotte (English)
-              </option>
-              <option value="en-US_LisaV3Voice">Lisa (English)</option>
-              <option value="en-US_KevinV3Voice">Kevin (English)</option>
-              <option value="en-US_EmilyV3Voice">Emily (English)</option>
-              <option value="en-US_AllisonV3Voice">Allison (English)</option>
-              <option value="en-US_OliviaV3Voice">Olivia (English)</option>
-              <option value="fr-CA_LouiseV3Voice">Louise (French)</option>
-              <option value="fr-FR_ReneeV3Voice">Renee (French)</option>
-              <option value="fr-FR_NicolasV3Voice">Nicolas (French)</option>
-              <option value="it-IT_FrancescaV3Voice">
-                Francesca (Italian)
-              </option>
-            </select>
+  <div class="wrapper">
+    <header>
+      <div class="logo">⬡ VOCA</div>
+      <div class="header-controls">
+        <label class="toggle-wrap">
+          <input type="checkbox" id="dark-toggle"/>
+          <span class="toggle-track">
+            <span class="toggle-thumb"></span>
+          </span>
+          <span class="toggle-label">Dark</span>
+        </label>
+        <select id="voice-select">
+          <option value="">Auto Voice</option>
+        </select>
+        <button id="reset-btn" title="Reset conversation">↺ Reset</button>
+      </div>
+    </header>
+
+    <main>
+      <div class="chat-container" id="chat-window">
+        <div id="message-list">
+          <div class="welcome-msg">
+            <span class="wm-icon">⬡</span>
+            <p>Hello! I'm VOCA, your AI voice assistant.<br/>Type or speak to get started.</p>
           </div>
         </div>
-        <div class="col-12 col-md-8 mx-auto mb-4">
-          <div id="chat-window" class="p-3 h-700">
-            <div id="message-list"></div>
-            <div class="loading-animation my-loading">
-              <div class="loading-dots my-loading">
-                <div class="dot"></div>
-                <div class="dot"></div>
-                <div class="dot"></div>
-              </div>
-            </div>
-            <div class="loading-animation">
-              <div class="loading-dots">
-                <div class="dot"></div>
-                <div class="dot"></div>
-                <div class="dot"></div>
-              </div>
-            </div>
-          </div>
-          <div class="input-group mt-1">
-            <input
-              type="text"
-              id="message-input"
-              class="form-control"
-              placeholder="Type your message here..."
-            />
-            <div class="input-group-append">
-              <!-- <button id="send-button" class="btn btn-primary">Send</button> -->
-              <button id="send-button" class="btn btn-primary microphone">
-                <i class="fa fa-microphone"></i>
-              </button>
-            </div>
-          </div>
+        <div class="typing-indicator" id="bot-typing" style="display:none">
+          <span></span><span></span><span></span>
         </div>
       </div>
-    </div>
-  </body>
+
+      <div class="input-bar">
+        <div class="stt-status" id="stt-status"></div>
+        <div class="input-row">
+          <input
+            type="text"
+            id="message-input"
+            placeholder="Ask me anything…"
+            autocomplete="off"
+          />
+          <button id="mic-btn" class="icon-btn mic-btn" title="Hold to speak">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="2" width="6" height="12" rx="3"/>
+              <path d="M5 10a7 7 0 0014 0M12 19v3M9 22h6"/>
+            </svg>
+          </button>
+          <button id="send-btn" class="icon-btn send-btn" title="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hint">Press <kbd>Enter</kbd> to send · Click mic to speak</div>
+      </div>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
 </html>

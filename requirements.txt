@@ -1,4 +1,5 @@
-Flask
-Flask_Cors
-openai
-requests
+flask
+flask-cors
+groq
+python-dotenv
+ 
