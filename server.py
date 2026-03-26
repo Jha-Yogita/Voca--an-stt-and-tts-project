@@ -2,6 +2,7 @@ import json
 from flask import Flask, render_template, request
 from flask_cors import CORS
 from worker import process_message, reset_chat
+import os
 
 app = Flask(__name__)
 cors = CORS(app, resources={r"/*": {"origins": "*"}})
@@ -34,4 +35,5 @@ def reset_conversation():
 
 
 if __name__ == "__main__":
-    app.run(port=8000, host='0.0.0.0', debug=True)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
